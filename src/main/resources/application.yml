@@ -1,0 +1,14 @@
+server:
+  port: 3000
+
+spring:
+  application:
+    name: "dxs-gateway-api"
+  cloud:
+    gateway:
+      routes:
+        - id: auth-public
+          uri: http://localhost:3008
+          predicates:
+            - Path=/public/api/v1/auth/**
+
