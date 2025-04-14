@@ -11,4 +11,12 @@ spring:
           uri: http://localhost:3008
           predicates:
             - Path=/public/api/v1/auth/**
+        - id: auth-private
+          uri: http://localhost:3008
+          predicates:
+            - Path=/private/api/v1/auth/**
+          filters:
+            - name: AuthenticationFilter
+              args:
+                authenticationUri: http://localhost:3008/private/api/v1/auth/verify-token
 
