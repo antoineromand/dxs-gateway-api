@@ -1,6 +1,10 @@
 server:
   port: 3000
 
+gateway:
+  api:
+    key: ${GATEWAY_API_KEY}
+
 spring:
   application:
     name: "dxs-gateway-api"

@@ -1,17 +1,14 @@
 package com.dxs.gateway.dxs_gateway_api.filter;
 
+import com.dxs.gateway.dxs_gateway_api.jwt.JwtDecoder;
 import com.dxs.gateway.dxs_gateway_api.jwt.Token;
-import com.dxs.gateway.dxs_gateway_api.jwt.TokenManager;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
-import org.springframework.cloud.gateway.filter.GatewayFilterChain;
-import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFactory;
-import org.springframework.http.HttpCookie;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.HttpStatusCode;
-import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.server.ServerWebExchange;
 
 import java.util.Objects;
 
@@ -19,19 +16,22 @@ import java.util.Objects;
 public class AuthenticationFilter extends AbstractGatewayFilterFactory<AuthenticationFilter.Config> {
 
     private final WebClient webClient;
-    private final TokenManager tokenManager;
+    private final JwtDecoder jwtDecoder;
 
-    public AuthenticationFilter(WebClient.Builder webClientBuilder, TokenManager tokenManager) {
+    @Value("${gateway.api.key}")
+    private String apiKey;
+
+    public AuthenticationFilter(WebClient.Builder webClientBuilder, JwtDecoder jwtDecoder) {
         super(Config.class);
         this.webClient = webClientBuilder.build();
-        this.tokenManager = tokenManager;
+        this.jwtDecoder = jwtDecoder;
     }
 
     @Override
     public GatewayFilter apply(Config config) {
         return (exchange, chain) -> {
-            String jwt = Objects.requireNonNull(exchange.getRequest().getCookies().getFirst("dxs-cookie-token")).getValue();
             try {
+                String jwt = Objects.requireNonNull(exchange.getRequest().getCookies().getFirst("dxs-cookie-token")).getValue();
                 return webClient.get()
                         .uri(config.getAuthenticationUri())
                         .cookie("dxs-cookie-token", jwt)
@@ -41,23 +41,28 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
                                 return exchange.getResponse().setComplete();
                             }
                             try {
-                                Token decodedToken = this.tokenManager.getDecodedToken(jwt);
-                                System.out.println(decodedToken.getId() + " // " + decodedToken.getRole());
-                                exchange.getResponse().setStatusCode(HttpStatus.OK);
-                                return exchange.getResponse().setComplete();
+                                Token decodedToken = this.jwtDecoder.decodeToken(jwt);
+                                ServerWebExchange mutatedExchange = exchange.mutate()
+                                        .request(exchange.getRequest().mutate()
+                                                .header("X-User-Id", decodedToken.getId())
+                                                .header("X-User-Role", decodedToken.getRole())
+                                                .header("X-Api-Key", this.apiKey)
+                                                .build())
+                                        .build();
+                                return chain.filter(mutatedExchange);
                             } catch (Exception e) {
-                                System.err.println("Error : " + e.getMessage());
+                                System.err.println("Error while decoding payload : " + e.getMessage());
                                 exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
                                 return exchange.getResponse().setComplete();
                             }
                         })
                         .onErrorResume(e -> {
-                            System.err.println("Error while verify token : " + e.getMessage());
+                            System.err.println("Invalid token : " + e.getMessage());
                             exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
                             return exchange.getResponse().setComplete();
                         });
-            } catch (Exception e) {
-                System.err.println("Error while getting token from cookie : " + e.getMessage());
+            } catch (NullPointerException e) {
+                System.err.println("Error while getting token from cookie : cookie token is " + e.getMessage());
                 exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
                 return exchange.getResponse().setComplete();
             }
